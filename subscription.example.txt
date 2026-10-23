@@ -1,0 +1,3 @@
+# Переименуйте в subscription.txt и вставьте ссылку на подписку (одной строкой).
+# Строки, начинающиеся с #, пропускаются. Файл subscription.txt в git не попадает.
+https://example.com/sub/XXXXXXXX

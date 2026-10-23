@@ -1,0 +1,97 @@
+# Шаблон конфига mihomo. core\build-config.ps1 подставляет вместо SUBSCRIPTION_URL ссылку
+# из subscription.txt и сохраняет результат в core\config.yaml (в git не попадает).
+# Справочник по полям: https://wiki.metacubex.one/config/
+
+mode: rule
+log-level: warning         # info пишет каждое соединение, лог растёт на десятки МБ в день
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: always  # правила PROCESS-NAME должны знать процесс для каждого соединения
+geo-auto-update: false     # GEOIP/GEOSITE не используем, базы не нужны
+
+# Локальный прокси для ручной проверки: curl -x http://127.0.0.1:7890 https://api.anthropic.com
+mixed-port: 7890
+bind-address: 127.0.0.1
+allow-lan: false
+
+# API и веб-панель: http://127.0.0.1:9090/ui (панель скачивается при первом запуске)
+external-controller: 127.0.0.1:9090
+external-ui: ui
+external-ui-url: https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz
+secret: ""
+
+profile:
+  store-selected: false
+  store-fake-ip: false
+
+# Виртуальный адаптер: через него проходит весь трафик машины, но наружу через прокси
+# уходит только то, что разрешено правилами ниже, остальное идёт напрямую
+tun:
+  enable: true
+  device: mihomo
+  stack: mixed
+  auto-route: true
+  auto-detect-interface: true   # обязательно, иначе прямой трафик зациклится в адаптер
+  strict-route: true
+  dns-hijack:
+    - any:53
+
+# Восстанавливаем доменное имя из TLS/HTTP, чтобы прокси получал домен, а не IP
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443]
+
+# DNS: всё через системные резолверы, а домены Claude через DoH 1.1.1.1 поверх прокси,
+# чтобы провайдер не видел эти запросы. По процессу DNS в mihomo не разделить
+dns:
+  enable: true
+  enhanced-mode: redir-host
+  nameserver:
+    - system
+  nameserver-policy:
+    "+.anthropic.com": "https://1.1.1.1/dns-query#proxy"
+    "+.claude.ai": "https://1.1.1.1/dns-query#proxy"
+    "+.claude.com": "https://1.1.1.1/dns-query#proxy"
+
+# Подписка: mihomo сам скачивает её каждые interval секунд и подменяет серверы
+# на лету, без перезапуска. exclude-filter: регулярное выражение Go по имени сервера
+proxy-providers:
+  sub:
+    type: http
+    url: "SUBSCRIPTION_URL"
+    interval: 10800
+    path: ./providers/sub.yaml
+    proxy: DIRECT
+    exclude-filter: "🇷🇺|(?i)росси|(?i)\\brussia\\b|(?i)(^|[^a-z])ru([^a-z]|$)"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+      timeout: 5000
+      lazy: true
+
+# Группа proxy сама выбирает самый быстрый сервер из подписки
+proxy-groups:
+  - name: proxy
+    type: url-test
+    use: [sub]
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 100
+    lazy: true
+
+# Через прокси идут только эти процессы, всё остальное напрямую
+rules:
+  - PROCESS-NAME,Claude.exe,proxy
+  - PROCESS-NAME,claude.exe,proxy
+  - MATCH,DIRECT

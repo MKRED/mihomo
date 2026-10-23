@@ -1,0 +1,19 @@
+<service>
+  <id>mihomo</id>
+  <name>mihomo</name>
+  <description>mihomo: выбранные программы через прокси из подписки</description>
+  <executable>%BASE%\mihomo.exe</executable>
+  <arguments>-d "%BASE%" -f "%BASE%\config.yaml"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>10 sec</stoptimeout>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>5120</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+</service>

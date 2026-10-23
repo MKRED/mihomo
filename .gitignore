@@ -1,0 +1,17 @@
+# Бинарники (скачивает core\get-binaries.ps1 или service.bat, пункт 1)
+*.exe
+*.zip
+*.tgz
+
+# Ссылка на подписку и собранный из неё конфиг
+subscription.txt
+core/config.yaml
+
+# Рабочие файлы mihomo
+core/providers/
+core/logs/
+core/ui/
+core/cache.db
+*.metadb
+*.mmdb
+*.dat
