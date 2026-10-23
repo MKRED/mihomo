@@ -10,7 +10,8 @@ tcp-concurrent: true
 find-process-mode: always  # правила PROCESS-NAME должны знать процесс для каждого соединения
 geo-auto-update: false     # GEOIP/GEOSITE не используем, базы не нужны
 
-# Локальный прокси для ручной проверки: curl -x http://127.0.0.1:7890 https://api.anthropic.com
+# Локальный HTTP/SOCKS5-прокси для программ на этом же компьютере: всё, что пришло
+# на этот порт, идёт через прокси (правило IN-PORT ниже). Например, curl -x http://127.0.0.1:7890 ...
 mixed-port: 7890
 bind-address: 127.0.0.1
 allow-lan: false
@@ -90,8 +91,9 @@ proxy-groups:
     tolerance: 100
     lazy: true
 
-# Через прокси идут только эти процессы, всё остальное напрямую
+# Через прокси идут только эти процессы и всё, что пришло на локальный порт 7890; остальное напрямую
 rules:
   - PROCESS-NAME,Claude.exe,proxy
   - PROCESS-NAME,claude.exe,proxy
+  - IN-PORT,7890,proxy
   - MATCH,DIRECT
