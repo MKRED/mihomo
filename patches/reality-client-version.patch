@@ -1,0 +1,52 @@
+diff --git a/component/tls/reality.go b/component/tls/reality.go
+index ff6a0a3..42d98b8 100644
+--- a/component/tls/reality.go
++++ b/component/tls/reality.go
+@@ -14,6 +14,7 @@ import (
+ 	"encoding/binary"
+ 	"errors"
+ 	"net"
++	"strconv"
+ 	"strings"
+ 	"time"
+ 
+@@ -28,6 +29,28 @@ import (
+ 
+ const RealityMaxShortIDLen = 8
+ 
++// RealityClientVersion is the Xray client version reported in the REALITY session ID.
++// Xray-core v26.7.11+ servers reject clients older than 26.3.27 by default (minClientVer),
++// so the hardcoded 1.8.2 no longer works. Override at build time:
++// -ldflags "-X github.com/metacubex/mihomo/component/tls.RealityClientVersion=26.10.21"
++var RealityClientVersion = "26.10.21"
++
++func realityClientVersionBytes() []byte {
++	parts := strings.Split(RealityClientVersion, ".")
++	if len(parts) != 3 {
++		return []byte{26, 10, 21}
++	}
++	b := make([]byte, 3)
++	for i, part := range parts {
++		n, err := strconv.ParseUint(part, 10, 8)
++		if err != nil {
++			return []byte{26, 10, 21}
++		}
++		b[i] = byte(n)
++	}
++	return b
++}
++
+ type RealityConfig struct {
+ 	PublicKey *ecdh.PublicKey
+ 	ShortID   [RealityMaxShortIDLen]byte
+@@ -71,9 +94,7 @@ func GetRealityConn(ctx context.Context, conn net.Conn, fingerprint UClientHello
+ 		binary.BigEndian.PutUint64(hello.SessionId, uint64(ntp.Now().Unix()))
+ 
+ 		copy(hello.SessionId[8:], realityConfig.ShortID[:])
+-		hello.SessionId[0] = 1
+-		hello.SessionId[1] = 8
+-		hello.SessionId[2] = 2
++		copy(hello.SessionId[:3], realityClientVersionBytes())
+ 
+ 		//log.Debugln("REALITY hello.sessionId[:16]: %v", hello.SessionId[:16])
+ 

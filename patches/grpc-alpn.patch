@@ -1,0 +1,16 @@
+diff --git a/transport/gun/gun.go b/transport/gun/gun.go
+index 39bf21f..daea95d 100644
+--- a/transport/gun/gun.go
++++ b/transport/gun/gun.go
+@@ -281,7 +281,10 @@ func NewTransport(dialFn DialFn, tlsConfig *vmess.TLSConfig, gunCfg *Config) *Tr
+ 
+ 		if tlsConfig.ShadowTLS == nil && tlsConfig.Restls == nil && tlsConfig.Reality == nil && tlsConfig.TLSMirror == nil { // shadowtls, restls, reality and tlsmirror don't return the negotiated ALPN
+ 			state := tlsC.GetTLSConnectionState(conn)
+-			if p := state.NegotiatedProtocol; p != Http2NextProtoTLS {
++			// Servers behind TLS with alpn http/1.1 (or without ALPN) still speak gRPC over HTTP/2,
++			// and Xray and sing-box clients accept them, so only reject protocols that are clearly not HTTP.
++			// The transport below always uses HTTP/2 with prior knowledge.
++			if p := state.NegotiatedProtocol; p != Http2NextProtoTLS && p != "http/1.1" && p != "" {
+ 				_ = conn.Close()
+ 				return nil, fmt.Errorf("http2: unexpected ALPN protocol %s, want %s", p, Http2NextProtoTLS)
+ 			}

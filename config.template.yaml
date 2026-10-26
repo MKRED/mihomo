@@ -74,6 +74,11 @@ proxy-providers:
     path: ./providers/sub.yaml
     proxy: DIRECT
     exclude-filter: "🇷🇺|(?i)росси|(?i)\\brussia\\b|(?i)(^|[^a-z])ru([^a-z]|$)"
+    # Правки серверов при каждом обновлении подписки. gRPC с пустым grpc-service-name
+    # mihomo отправляет на путь /GunService/Tun, а xray-серверы ждут //Tun, как клиенты xray и sing-box
+    override:
+      override-expr:
+        - '(select(.network == "grpc" and (.grpc-opts.grpc-service-name == "" or .grpc-opts.grpc-service-name == null)) | .grpc-opts.grpc-service-name) = "//Tun"'
     health-check:
       enable: true
       url: https://www.gstatic.com/generate_204

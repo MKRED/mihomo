@@ -1,0 +1,142 @@
+# Собирает mihomo.exe из официальных исходников с патчами из patches/ и выкладывает
+# в Releases этого репозитория (тег core-v<версия>). Оттуда его скачивает core\get-binaries.ps1.
+#
+# Когда запускается:
+#   - раз в сутки: если у MetaCubeX/mihomo вышел новый релиз, а у нас его ещё нет, собираем;
+#   - после пуша, меняющего patches/ или этот файл: пересобираем последнюю версию;
+#   - вручную (Actions -> Build patched mihomo -> Run workflow): можно указать версию.
+# Если патч перестал накладываться на новую версию, сборка падает, старые релизы остаются.
+
+name: Build patched mihomo
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "patches/**"
+      - ".github/workflows/build-core.yml"
+  workflow_dispatch:
+    inputs:
+      mihomo_version:
+        description: "Версия mihomo, например 1.19.33 (пусто: последняя)"
+        required: false
+        default: ""
+      force:
+        description: "Пересобрать, даже если такой релиз уже есть"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-core
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Выбрать версии
+        id: v
+        run: |
+          mihomo="${{ inputs.mihomo_version }}"
+          if [ -z "$mihomo" ]; then
+            mihomo=$(gh api repos/MetaCubeX/mihomo/releases/latest --jq .tag_name)
+          fi
+          mihomo="${mihomo#v}"
+          # Версия Xray, которой mihomo представляется серверам REALITY (см. patches/reality-client-version.patch)
+          xray=$(gh api repos/XTLS/Xray-core/releases/latest --jq .tag_name)
+          xray="${xray#v}"
+          tag="core-v$mihomo"
+
+          build=true
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "${{ github.event_name }}" = "schedule" ] || { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" != "true" ]; }; then
+              build=false
+            fi
+          fi
+          echo "mihomo=$mihomo xray=$xray tag=$tag build=$build"
+          {
+            echo "mihomo=$mihomo"
+            echo "xray=$xray"
+            echo "tag=$tag"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Исходники этого репозитория (патчи)
+        if: steps.v.outputs.build == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: self
+
+      - name: Исходники mihomo v${{ steps.v.outputs.mihomo }}
+        if: steps.v.outputs.build == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: MetaCubeX/mihomo
+          ref: v${{ steps.v.outputs.mihomo }}
+          path: upstream
+
+      - name: Наложить патчи
+        if: steps.v.outputs.build == 'true'
+        working-directory: upstream
+        run: |
+          for p in ../self/patches/*.patch; do
+            echo "== $p"
+            git apply --verbose "$p"
+          done
+          git diff --stat
+
+      - name: Go
+        if: steps.v.outputs.build == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: upstream/go.sum
+
+      - name: Собрать (windows-amd64-compatible, как официальная сборка)
+        if: steps.v.outputs.build == 'true'
+        working-directory: upstream
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+          GOAMD64: v1
+        run: |
+          mkdir -p ../dist
+          go build -tags with_gvisor -trimpath -ldflags "\
+            -X 'github.com/metacubex/mihomo/constant.Version=v${{ steps.v.outputs.mihomo }}-patched' \
+            -X 'github.com/metacubex/mihomo/constant.BuildTime=$(date -u)' \
+            -X 'github.com/metacubex/mihomo/component/tls.RealityClientVersion=${{ steps.v.outputs.xray }}' \
+            -w -s" -o ../dist/mihomo.exe .
+          cd ../dist
+          zip -9 mihomo-windows-amd64-compatible.zip mihomo.exe
+          sha256sum mihomo-windows-amd64-compatible.zip > mihomo-windows-amd64-compatible.zip.sha256
+          cat mihomo-windows-amd64-compatible.zip.sha256
+
+      - name: Опубликовать релиз ${{ steps.v.outputs.tag }}
+        if: steps.v.outputs.build == 'true'
+        run: |
+          tag="${{ steps.v.outputs.tag }}"
+          cat > notes.md <<EOF
+          mihomo v${{ steps.v.outputs.mihomo }} (Windows amd64, compatible), собран из официальных исходников
+          [MetaCubeX/mihomo@v${{ steps.v.outputs.mihomo }}](https://github.com/MetaCubeX/mihomo/tree/v${{ steps.v.outputs.mihomo }}) с патчами:
+
+          - \`reality-client-version.patch\`: в REALITY сообщается версия клиента ${{ steps.v.outputs.xray }} вместо 1.8.2
+            (серверы Xray-core v26.7.11+ отвергают клиентов старше 26.3.27);
+          - \`grpc-alpn.patch\`: gRPC не рвётся, если сервер согласовал ALPN http/1.1 или не согласовал никакой.
+
+          Коммит патчей: ${{ github.sha }}. Лицензия mihomo: GPL-3.0.
+          EOF
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.zip dist/*.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" dist/*.zip dist/*.sha256 --title "mihomo v${{ steps.v.outputs.mihomo }} (patched)" \
+              --notes-file notes.md --target "${{ github.sha }}" --repo "$GITHUB_REPOSITORY"
+          fi

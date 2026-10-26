@@ -20,7 +20,9 @@ subscription.txt + config.template.yaml --> core\build-config.ps1 --> core\confi
 | `config.template.yaml` | Шаблон конфига mihomo. Здесь правила (какие процессы через прокси), фильтр серверов, интервалы |
 | `subscription.txt` | Ссылка на подписку, одной строкой. В git не попадает (образец: `subscription.example.txt`) |
 | `core\build-config.ps1` | Подставляет ссылку в шаблон, сохраняет `core\config.yaml`, проверяет его `mihomo -t` |
-| `core\get-binaries.ps1` | Скачивает `mihomo.exe` и WinSW (`mihomo-service.exe`) с GitHub |
+| `core\get-binaries.ps1` | Скачивает `mihomo.exe` (сборку с патчами из Releases этого репозитория) и WinSW (`mihomo-service.exe`) |
+| `patches\` | Патчи к исходникам mihomo, см. «Ядро с патчами» |
+| `.github\workflows\build-core.yml` | Сборка ядра с патчами в GitHub Actions и публикация в Releases |
 | `core\mihomo-service.xml` | Описание службы для WinSW: автозапуск, перезапуск при падении, ротация логов |
 | `core\status.ps1` | Состояние службы, подписки и выбранного сервера; `-All` прогоняет все серверы |
 | `core\reload.ps1` | Команды работающей службе через API: перечитать конфиг, обновить подписку |
@@ -77,15 +79,37 @@ subscription.txt + config.template.yaml --> core\build-config.ps1 --> core\confi
 curl -x http://127.0.0.1:7890 https://www.gstatic.com/generate_204 -o nul -w "%{http_code}"
 ```
 
+## Ядро с патчами
+
+Официальный mihomo не подключается к части серверов подписки, поэтому используется своя сборка:
+те же исходники [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo) и два небольших патча из `patches\`.
+
+- **`reality-client-version.patch`.** В рукопожатии REALITY клиент сообщает серверу свою версию.
+  У mihomo она захардкожена как 1.8.2, а серверы Xray-core v26.7.11+ по умолчанию пускают только клиентов
+  не старше 26.3.27 (`minClientVer`) и остальным молча отдают настоящий сайт: в логе
+  `REALITY authentication failed`. Патч подставляет номер последнего релиза Xray на момент сборки.
+  Разработчики mihomo исправлять это отказались (MetaCubeX/mihomo#3132, #3339).
+- **`grpc-alpn.patch`.** Часть gRPC-серверов согласует ALPN `http/1.1` или не согласует его вовсе,
+  хотя говорит по HTTP/2. mihomo на этом рвал соединение (`http2: unexpected ALPN protocol http/1.1, want h2`),
+  а xray и sing-box работают. Патч ведёт себя так же, как они.
+
+Третья причина не требует патча и решается в `config.template.yaml` (`proxy-providers.sub.override`):
+для gRPC с пустым `grpc-service-name` mihomo идёт на путь `/GunService/Tun`, а серверы xray ждут `//Tun`.
+
+Собирает ядро GitHub Actions (`.github\workflows\build-core.yml`). Сборка запускается раз в сутки,
+если у MetaCubeX вышел новый релиз, после изменения патчей и вручную. Результат публикуется в Releases этого репозитория
+с тегом `core-v<версия>`: архив `mihomo-windows-amd64-compatible.zip` и его SHA-256.
+`core\get-binaries.ps1` скачивает оттуда последнюю версию и сверяет контрольную сумму, поэтому Go на машине не нужен.
+Если новая версия mihomo сломает патч, сборка упадёт с письмом от GitHub, а прежние релизы останутся.
+
+Официальное ядро без патчей: `core\get-binaries.ps1 -Force -Upstream -MihomoVersion 1.19.33`.
+mihomo распространяется под GPL-3.0, а исходники сборки — это его тег плюс патчи из этого репозитория.
+
 ## Известные ограничения
 
-- **gRPC-серверы подписки в mihomo не работают.** Их серверы договариваются о ALPN `http/1.1`,
-  а mihomo для gRPC требует строго `h2` (ошибка `http2: unexpected ALPN protocol http/1.1, want h2`).
-  sing-box и xray на это не смотрят, поэтому там те же серверы работают. Такие серверы в пункте 8
-  всегда показаны как «не отвечает», группа их просто не выбирает. Починить это на стороне клиента нельзя.
 - DNS по процессу не разделяется, домены Claude для DoH через прокси перечислены вручную (см. выше).
 
 ## Обновление mihomo
 
-Версия задаётся параметром `MihomoVersion` в `core\get-binaries.ps1`. Остановите службу (пункт 3),
-запустите `core\get-binaries.ps1 -Force`, запустите службу (пункт 2).
+Остановите службу (пункт 3), запустите `core\get-binaries.ps1 -Force` (возьмёт последнюю сборку из Releases,
+конкретную версию можно задать `-MihomoVersion 1.19.33`), запустите службу (пункт 2).
