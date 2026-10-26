@@ -27,7 +27,7 @@ subscription.txt + config.template.yaml --> core\build-config.ps1 --> core\confi
 | `core\status.ps1` | Состояние службы, подписки и выбранного сервера; `-All` прогоняет все серверы |
 | `core\reload.ps1` | Команды работающей службе через API: перечитать конфиг, обновить подписку |
 
-Рабочие файлы mihomo (`core\providers\`, `core\ui\`, `core\logs\`, `core\cache.db`) в git не попадают.
+Рабочие файлы mihomo (`core\providers\`, `core\rules\`, `core\ui\`, `core\logs\`, `core\cache.db`) в git не попадают.
 
 ## Установка
 
