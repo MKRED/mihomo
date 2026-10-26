@@ -70,13 +70,13 @@ jobs:
 
       - name: Исходники этого репозитория (патчи)
         if: steps.v.outputs.build == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: self
 
       - name: Исходники mihomo v${{ steps.v.outputs.mihomo }}
         if: steps.v.outputs.build == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: MetaCubeX/mihomo
           ref: v${{ steps.v.outputs.mihomo }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Go
         if: steps.v.outputs.build == 'true'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: stable
           cache-dependency-path: upstream/go.sum
