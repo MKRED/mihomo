@@ -9,6 +9,7 @@ core/config.yaml
 
 # Рабочие файлы mihomo
 core/providers/
+core/rules/
 core/logs/
 core/ui/
 core/cache.db

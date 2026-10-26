@@ -96,8 +96,35 @@ proxy-groups:
     tolerance: 100
     lazy: true
 
-# Через прокси идут только эти процессы и всё, что пришло на локальный порт 7890; остальное напрямую
+# Российские домены и IP из https://github.com/MetaCubeX/meta-rules-dat: mihomo сам скачивает
+# списки и обновляет их раз в сутки. ru-domains: зоны .ru, .su, .рф и российские сервисы
+# на других доменах (Яндекс, VK и т.п.), ru-ip: российские диапазоны адресов
+rule-providers:
+  ru-domains:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/category-ru.mrs
+    path: ./rules/category-ru.mrs
+    interval: 86400
+    proxy: DIRECT
+  ru-ip:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geoip/ru.mrs
+    path: ./rules/geoip-ru.mrs
+    interval: 86400
+    proxy: DIRECT
+
+# Через прокси идут только эти процессы и всё, что пришло на локальный порт 7890; остальное напрямую.
+# Российские сайты идут напрямую всегда, даже от Claude и через порт 7890 (например, когда расширение
+# браузера отправляет в прокси все сайты): банки и госуслуги часто не пускают с зарубежных IP.
+# no-resolve: список IP проверяется, только если программа подключается прямо по IP. Иначе mihomo
+# резолвил бы через системный DNS каждый домен, идущий в прокси, и провайдер видел бы эти запросы
 rules:
+  - RULE-SET,ru-domains,DIRECT
+  - RULE-SET,ru-ip,DIRECT,no-resolve
   - PROCESS-NAME,Claude.exe,proxy
   - PROCESS-NAME,claude.exe,proxy
   - IN-PORT,7890,proxy
