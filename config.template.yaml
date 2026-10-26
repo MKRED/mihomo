@@ -73,7 +73,7 @@ proxy-providers:
     interval: 10800
     path: ./providers/sub.yaml
     proxy: DIRECT
-    exclude-filter: "🇷🇺|(?i)росси|(?i)\\brussia\\b|(?i)(^|[^a-z])ru([^a-z]|$)"
+    exclude-filter: "🇷🇺|(?i)росси|(?i)\\brussia\\b|(?i)(^|[^a-z])ru([^a-z]|$)|Gemini"
     # Правки серверов при каждом обновлении подписки. gRPC с пустым grpc-service-name
     # mihomo отправляет на путь /GunService/Tun, а xray-серверы ждут //Tun, как клиенты xray и sing-box
     override:
