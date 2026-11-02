@@ -8,7 +8,9 @@
   видят «скачал exe и сразу выполнил» и бьют тревогу.
   mihomo берётся из Releases этого репозитория (теги core-v*): это официальные исходники
   с патчами из patches\, собранные GitHub Actions (.github\workflows\build-core.yml).
-  Сборка «compatible»: работает на любом x64-процессоре. Контрольная сумма архива проверяется.
+  Сборка «compatible»: работает на любом x64-процессоре. Контрольные суммы проверяются у всех файлов:
+  у сборки с патчами по .sha256 из релиза, у официальной по полю digest из API GitHub,
+  у WinSW по таблице $WinswSha256 в этом скрипте.
 
 .PARAMETER Force
   Скачать заново, даже если файлы уже есть (например, чтобы обновить версию).
@@ -34,6 +36,12 @@ param(
     [string]$WinswVersion  = '2.12.0'
 )
 
+# SHA-256 WinSW-x64.exe по версиям: в релизах WinSW контрольных сумм нет, поэтому они записаны здесь.
+# Для новой версии посчитайте Get-FileHash WinSW-x64.exe и добавьте строку
+$WinswSha256 = @{
+    '2.12.0' = '05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da'
+}
+
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 $Bin = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -51,6 +59,17 @@ function Get-File {
     Write-Host ("  готово, {0:N1} МБ" -f ((Get-Item $Path).Length / 1MB))
 }
 
+# Сверяет SHA-256 файла; при несовпадении удаляет файл и бросает ошибку
+function Assert-Sha256 {
+    param([string]$Path, [string]$Want)
+    $got = (Get-FileHash $Path -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $Want.ToLower()) {
+        Remove-Item $Path -Force
+        throw "контрольная сумма $(Split-Path -Leaf $Path) не совпала (ожидалась $Want, получилась $got)"
+    }
+    Write-Host "  контрольная сумма совпала"
+}
+
 $ok = $true
 
 # --- mihomo -----------------------------------------------------------------
@@ -62,7 +81,14 @@ if ($Force -or -not (Test-Path $exe)) {
         if ($Upstream) {
             if (-not $MihomoVersion) { throw "для -Upstream укажите -MihomoVersion, например 1.19.33" }
             Write-Host "mihomo $MihomoVersion (официальная сборка, без патчей)"
-            Get-File "https://github.com/MetaCubeX/mihomo/releases/download/v$MihomoVersion/mihomo-windows-amd64-compatible-v$MihomoVersion.zip" $zip
+            # Отдельного файла с суммой у MetaCubeX нет, но GitHub отдаёт SHA-256 каждого файла релиза в API (поле digest)
+            $asset = "mihomo-windows-amd64-compatible-v$MihomoVersion.zip"
+            $rel = Invoke-RestMethod "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/v$MihomoVersion" -UseBasicParsing -TimeoutSec 60
+            $digest = @($rel.assets) | Where-Object { $_.name -eq $asset } | Select-Object -First 1 -ExpandProperty digest
+            if ($digest -notmatch '^sha256:([0-9a-f]{64})$') { throw "GitHub не отдал SHA-256 для $asset, проверить архив нечем" }
+            $want = $Matches[1]
+            Get-File "https://github.com/MetaCubeX/mihomo/releases/download/v$MihomoVersion/$asset" $zip
+            Assert-Sha256 $zip $want
         } else {
             if ($MihomoVersion) {
                 $tag = "core-v$MihomoVersion"
@@ -81,9 +107,7 @@ if ($Force -or -not (Test-Path $exe)) {
             Invoke-WebRequest -Uri "$base.sha256" -OutFile $sumFile -UseBasicParsing -TimeoutSec 60
             $want = ((Get-Content $sumFile -Raw).Trim() -split '\s+')[0].ToLower()
             Remove-Item $sumFile -Force
-            $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-            if ($got -ne $want) { throw "контрольная сумма архива не совпала (ожидалась $want, получилась $got)" }
-            Write-Host "  контрольная сумма совпала"
+            Assert-Sha256 $zip $want
         }
         if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
         Expand-Archive -Path $zip -DestinationPath $extract -Force
@@ -107,7 +131,13 @@ $svcExe = Join-Path $Bin 'mihomo-service.exe'
 if ($Force -or -not (Test-Path $svcExe)) {
     Write-Host "WinSW $WinswVersion"
     try {
-        Get-File "https://github.com/winsw/winsw/releases/download/v$WinswVersion/WinSW-x64.exe" $svcExe
+        $want = $WinswSha256[$WinswVersion]
+        if (-not $want) { throw "для WinSW $WinswVersion нет контрольной суммы, добавьте её в `$WinswSha256 в начале скрипта" }
+        # Качаем во временный файл: при -Force рабочий mihomo-service.exe не должен пропасть, если сумма не совпала
+        $tmpExe = "$svcExe.download"
+        Get-File "https://github.com/winsw/winsw/releases/download/v$WinswVersion/WinSW-x64.exe" $tmpExe
+        Assert-Sha256 $tmpExe $want
+        Move-Item $tmpExe $svcExe -Force
     } catch {
         Write-Host "  ОШИБКА: $($_.Exception.Message)"
         $ok = $false

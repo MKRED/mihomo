@@ -28,11 +28,12 @@ try {
 
     $tplPath = Join-Path $Root 'config.template.yaml'
     $tpl = [IO.File]::ReadAllText($tplPath, [Text.Encoding]::UTF8)
-    if ($tpl -notmatch 'SUBSCRIPTION_URL') { throw "в config.template.yaml нет слова SUBSCRIPTION_URL" }
+    if (-not $tpl.Contains('"SUBSCRIPTION_URL"')) { throw "в config.template.yaml нет значения ""SUBSCRIPTION_URL"" в двойных кавычках" }
 
-    # Ссылка стоит в YAML внутри двойных кавычек: экранируем \ и "
+    # Ссылка стоит в YAML внутри двойных кавычек: экранируем \ и ".
+    # Заменяем только значение в кавычках, чтобы ссылка не попала в комментарии
     $yamlUrl = $subUrl.Replace('\', '\\').Replace('"', '\"')
-    $cfg = $tpl.Replace('SUBSCRIPTION_URL', $yamlUrl)
+    $cfg = $tpl.Replace('"SUBSCRIPTION_URL"', '"' + $yamlUrl + '"')
 
     $cfgPath = Join-Path $Bin 'config.yaml'
     [IO.File]::WriteAllText($cfgPath, $cfg, (New-Object Text.UTF8Encoding($false)))
