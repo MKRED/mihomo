@@ -1,5 +1,6 @@
 # Шаблон конфига mihomo. core\build-config.ps1 подставляет вместо SUBSCRIPTION_URL ссылку
 # из subscription.txt и сохраняет результат в core\config.yaml (в git не попадает).
+# Если ссылок несколько, блок подписки sub копируется на каждую (sub2, sub3...), см. proxy-providers.
 # Справочник по полям: https://wiki.metacubex.one/config/
 
 mode: rule
@@ -65,7 +66,11 @@ dns:
     "+.claude.com": "https://1.1.1.1/dns-query#proxy"
 
 # Подписка: mihomo сам скачивает её каждые interval секунд и подменяет серверы
-# на лету, без перезапуска. exclude-filter: регулярное выражение Go по имени сервера
+# на лету, без перезапуска. exclude-filter: регулярное выражение Go по имени сервера.
+# Для второй и следующих ссылок из subscription.txt build-config.ps1 копирует этот блок целиком
+# (sub2 с ./providers/sub2.yaml и т.д.) и дописывает их в use группы proxy. Тогда же к именам
+# серверов добавляется номер подписки ([1] , [2] ...), так что exclude-filter видит имя без номера
+# Блок sub должен заканчиваться перед строкой с отступом не больше двух пробелов
 proxy-providers:
   sub:
     type: http

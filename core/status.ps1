@@ -19,7 +19,6 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 $Bin  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $Bin
 $Group = 'proxy'   # имя группы в config.template.yaml
-$Provider = 'sub'  # имя подписки в config.template.yaml
 
 $apiForced = [bool]$Api   # с явным -Api опрашиваем API, даже если служба не установлена (для проверки)
 if (-not $Api) {
@@ -62,21 +61,26 @@ if (-not $svc) {
 # --- API: подписка и выбранный сервер ----------------------------------------
 if (-not $apiForced -and (-not $svc -or $svc.Status -ne 'Running')) { exit 0 }
 try {
-    $pr = Get-Api "/providers/proxies/$Provider"
-    $count = @($pr.proxies).Count
-    $updated = if ($pr.updatedAt) { ([DateTime]$pr.updatedAt).ToString('yyyy-MM-dd HH:mm') } else { '?' }
-    $paid = ''
-    if ($pr.subscriptionInfo -and $pr.subscriptionInfo.Expire -gt 0) {
-        $paid = ", оплачена до " + [DateTimeOffset]::FromUnixTimeSeconds([long]$pr.subscriptionInfo.Expire).LocalDateTime.ToString('yyyy-MM-dd')
+    # Подписки (sub, sub2...) — это провайдеры типа HTTP; встроенный default к ним не относится
+    $providers = Get-Api '/providers/proxies'
+    $subs = @($providers.providers.PSObject.Properties | Where-Object { $_.Value.vehicleType -eq 'HTTP' } | Sort-Object Name | ForEach-Object { $_.Value })
+    foreach ($pr in $subs) {
+        $count = @($pr.proxies).Count
+        $updated = if ($pr.updatedAt) { ([DateTime]$pr.updatedAt).ToString('yyyy-MM-dd HH:mm') } else { '?' }
+        $paid = ''
+        if ($pr.subscriptionInfo -and $pr.subscriptionInfo.Expire -gt 0) {
+            $paid = ", оплачена до " + [DateTimeOffset]::FromUnixTimeSeconds([long]$pr.subscriptionInfo.Expire).LocalDateTime.ToString('yyyy-MM-dd')
+        }
+        $label = if ($subs.Count -gt 1) { "Подписка $($pr.name)" } else { 'Подписка' }
+        Write-Host "${label}: серверов $count, обновлена $updated$paid"
     }
-    Write-Host "Подписка: серверов $count, обновлена $updated$paid"
 
     $g = Get-Api "/proxies/$Group"
     $now = if ($g.now) { $g.now } else { 'ещё не выбран' }
     $delay = ''
     if ($g.now) {
         # Серверы подписки лежат в /providers/proxies, а не в /proxies; имя с эмодзи в адресе запроса mihomo не находит
-        $p = @($pr.proxies) | Where-Object { $_.name -eq $g.now } | Select-Object -First 1
+        $p = @($subs | ForEach-Object { @($_.proxies) }) | Where-Object { $_.name -eq $g.now } | Select-Object -First 1
         $h = if ($p) { @($p.history) | Select-Object -Last 1 }
         if ($h -and $h.delay -gt 0) { $delay = " ($($h.delay) мс)" }
     }

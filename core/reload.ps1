@@ -5,7 +5,7 @@
 .PARAMETER Action
   Config       - перечитать core\config.yaml (после правки config.template.yaml и сборки build-config.ps1).
                  TUN-адаптер пересоздаётся только если изменился раздел tun.
-  Subscription - скачать подписку заново и подменить серверы.
+  Subscription - скачать подписки заново (все, если их несколько) и подменить серверы.
 
 .PARAMETER Api
   Адрес API mihomo. По умолчанию берётся из config.template.yaml (external-controller).
@@ -22,7 +22,6 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 $Bin  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $Bin
-$Provider = 'sub'  # имя подписки в config.template.yaml
 
 if (-not $Api) {
     $Api = '127.0.0.1:9090'
@@ -48,9 +47,16 @@ try {
             Write-Host "Конфиг перечитан"
         }
         'Subscription' {
-            Put-Api "/providers/proxies/$Provider"
-            $pr = Get-Api "/providers/proxies/$Provider"
-            Write-Host "Подписка обновлена, серверов в группе: $(@($pr.proxies).Count)"
+            # Подписки (sub, sub2...) — это провайдеры типа HTTP; встроенный default к ним не относится
+            $providers = Get-Api '/providers/proxies'
+            $subs = @($providers.providers.PSObject.Properties | Where-Object { $_.Value.vehicleType -eq 'HTTP' } | ForEach-Object { $_.Name } | Sort-Object)
+            if (-not $subs) { throw "в работающем конфиге нет подписок" }
+            foreach ($name in $subs) {
+                Put-Api "/providers/proxies/$([Uri]::EscapeDataString($name))"
+                $pr = Get-Api "/providers/proxies/$([Uri]::EscapeDataString($name))"
+                $label = if ($subs.Count -gt 1) { "Подписка $name обновлена" } else { 'Подписка обновлена' }
+                Write-Host "${label}, серверов: $(@($pr.proxies).Count)"
+            }
         }
     }
     exit 0
