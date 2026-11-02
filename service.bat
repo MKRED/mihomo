@@ -37,6 +37,7 @@ echo  6 - Показать последние строки лога
 echo  7 - Обновить подписку сейчас
 echo  8 - Серверы группы и задержки
 echo  9 - Открыть веб-панель в браузере
+echo 10 - Обновить ядро mihomo и панель (если вышла новая сборка)
 echo  0 - Выход
 echo.
 set "SEL="
@@ -51,6 +52,7 @@ if "%SEL%"=="6" goto log
 if "%SEL%"=="7" goto update
 if "%SEL%"=="8" goto servers
 if "%SEL%"=="9" goto panel
+if "%SEL%"=="10" goto upgrade
 goto menu
 
 :install
@@ -121,3 +123,9 @@ pause & goto menu
 :panel
 start "" "http://127.0.0.1:9090/ui"
 goto menu
+
+:upgrade
+:: Сверяет ядро с последней сборкой в Releases; если она новее, скачивает, проверяет
+:: и заменяет (служба остановится на несколько секунд, при сбое вернётся прежнее ядро)
+%PS% "%CORE%\update-core.ps1"
+pause & goto menu

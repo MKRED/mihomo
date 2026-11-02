@@ -16,3 +16,7 @@ core/cache.db
 *.metadb
 *.mmdb
 *.dat
+
+# Состояние установленного ядра и временная папка обновления (core\update-core.ps1)
+core/mihomo.state.json
+core/update-tmp/

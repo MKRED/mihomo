@@ -26,6 +26,18 @@
 
 .PARAMETER WinswVersion
   Версия WinSW, см. https://github.com/winsw/winsw/releases
+
+.PARAMETER OutDir
+  Куда положить mihomo.exe и mihomo.state.json (по умолчанию core\). update-core.ps1 скачивает
+  новое ядро во временную папку, пока работает старое.
+
+.PARAMETER MihomoOnly
+  Не трогать WinSW.
+
+.NOTES
+  Рядом с mihomo.exe пишется mihomo.state.json: тег релиза, SHA-256 архива и SHA-256 exe.
+  По нему update-core.ps1 понимает, та ли сборка стоит, что лежит в Releases сейчас
+  (пересборка той же версии выкладывается под тем же тегом).
 #>
 [CmdletBinding()]
 param(
@@ -33,7 +45,9 @@ param(
     [string]$MihomoVersion,
     [switch]$Upstream,
     [string]$Repo          = 'MKRED/mihomo',
-    [string]$WinswVersion  = '2.12.0'
+    [string]$WinswVersion  = '2.12.0',
+    [string]$OutDir,
+    [switch]$MihomoOnly
 )
 
 # SHA-256 WinSW-x64.exe по версиям: в релизах WinSW контрольных сумм нет, поэтому они записаны здесь.
@@ -45,6 +59,8 @@ $WinswSha256 = @{
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 $Bin = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not $OutDir) { $OutDir = $Bin }
+if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
 # TLS 1.2 обязателен для GitHub; TLS 1.3 добавляем, если система его знает (на старых Windows 10 его нет)
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor 12288 }
@@ -73,10 +89,11 @@ function Assert-Sha256 {
 $ok = $true
 
 # --- mihomo -----------------------------------------------------------------
-$exe = Join-Path $Bin 'mihomo.exe'
+$exe = Join-Path $OutDir 'mihomo.exe'
+$stateFile = Join-Path $OutDir 'mihomo.state.json'
 if ($Force -or -not (Test-Path $exe)) {
-    $zip = Join-Path $Bin 'mihomo-download.zip'
-    $extract = Join-Path $Bin 'mihomo-download-tmp'
+    $zip = Join-Path $OutDir 'mihomo-download.zip'
+    $extract = Join-Path $OutDir 'mihomo-download-tmp'
     try {
         if ($Upstream) {
             if (-not $MihomoVersion) { throw "для -Upstream укажите -MihomoVersion, например 1.19.33" }
@@ -87,6 +104,7 @@ if ($Force -or -not (Test-Path $exe)) {
             $digest = @($rel.assets) | Where-Object { $_.name -eq $asset } | Select-Object -First 1 -ExpandProperty digest
             if ($digest -notmatch '^sha256:([0-9a-f]{64})$') { throw "GitHub не отдал SHA-256 для $asset, проверить архив нечем" }
             $want = $Matches[1]
+            $tag = "v$MihomoVersion (MetaCubeX, без патчей)"
             Get-File "https://github.com/MetaCubeX/mihomo/releases/download/v$MihomoVersion/$asset" $zip
             Assert-Sha256 $zip $want
         } else {
@@ -115,9 +133,12 @@ if ($Force -or -not (Test-Path $exe)) {
         if (-not $found) { throw "в архиве нет exe" }
         Move-Item $found.FullName $exe -Force
         Write-Host ("  распакован mihomo.exe, {0:N1} МБ" -f ((Get-Item $exe).Length / 1MB))
+        $state = [ordered]@{ tag = $tag; archive = $want.ToLower(); exe = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() }
+        [IO.File]::WriteAllText($stateFile, ($state | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
     } catch {
         Write-Host "  ОШИБКА: $($_.Exception.Message)"
         $ok = $false
+        if (Test-Path $stateFile) { Remove-Item $stateFile -Force }  # какая сборка стоит, теперь неизвестно
     } finally {
         if (Test-Path $zip) { Remove-Item $zip -Force }
         if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
@@ -128,7 +149,9 @@ if ($Force -or -not (Test-Path $exe)) {
 
 # --- WinSW (обёртка, запускающая mihomo как службу Windows) ----------------
 $svcExe = Join-Path $Bin 'mihomo-service.exe'
-if ($Force -or -not (Test-Path $svcExe)) {
+if ($MihomoOnly) {
+    # WinSW не нужен
+} elseif ($Force -or -not (Test-Path $svcExe)) {
     Write-Host "WinSW $WinswVersion"
     try {
         $want = $WinswSha256[$WinswVersion]
@@ -153,6 +176,7 @@ if (-not $ok) {
     Write-Host "  WinSW-x64.exe из https://github.com/winsw/winsw/releases, переименовать в mihomo-service.exe"
     exit 1
 }
+if ($MihomoOnly) { exit 0 }
 Write-Host ""
 Write-Host "Если антивирус ругается на этот скрипт или на mihomo.exe, добавьте папку проекта в исключения:"
 Write-Host "  это обычное поведение для загрузки программы и создания VPN-адаптера, а не заражение."
