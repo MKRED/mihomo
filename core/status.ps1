@@ -75,30 +75,63 @@ try {
         Write-Host "${label}: серверов $count, обновлена $updated$paid"
     }
 
-    $g = Get-Api "/proxies/$Group"
-    $now = if ($g.now) { $g.now } else { 'ещё не выбран' }
-    $delay = ''
-    if ($g.now) {
-        # Серверы подписки лежат в /providers/proxies, а не в /proxies; имя с эмодзи в адресе запроса mihomo не находит
-        $p = @($subs | ForEach-Object { @($_.proxies) }) | Where-Object { $_.name -eq $g.now } | Select-Object -First 1
-        $h = if ($p) { @($p.history) | Select-Object -Last 1 }
-        if ($h -and $h.delay -gt 0) { $delay = " ($($h.delay) мс)" }
+    # В /proxies лежат группы (у них есть all и now), серверы подписок — в /providers/proxies.
+    # Читаем всё одним запросом: имя с эмодзи в адресе /proxies/<имя> mihomo не находит
+    $px = (Get-Api '/proxies').proxies
+    $servers = @{}
+    foreach ($pr in $subs) { foreach ($p in @($pr.proxies)) { $servers[$p.name] = $p } }
+    function Test-IsGroup([string]$Name) { $p = $px.$Name; [bool]($p -and $p.PSObject.Properties['all']) }
+
+    # Если proxy — переключатель (select), его выбор и есть режим работы
+    $modeGroup = $Group
+    if ($px.$Group.type -eq 'Selector' -and $px.$Group.now) {
+        $modeGroup = $px.$Group.now
+        Write-Host "Режим: $modeGroup"
     }
-    Write-Host "Прокси сейчас: $now$delay"
+
+    # Цепочка выбора: режим -> группа приоритета -> сервер
+    $chain = @()
+    $name = $modeGroup
+    while ((Test-IsGroup $name) -and $px.$name.now -and $chain.Count -lt 10) { $name = $px.$name.now; $chain += $name }
+    if (-not $chain) {
+        Write-Host "Прокси сейчас: ещё не выбран"
+    } else {
+        $delay = ''
+        $h = if ($servers.ContainsKey($name)) { @($servers[$name].history) | Select-Object -Last 1 }
+        if ($h -and $h.delay -gt 0) { $delay = " ($($h.delay) мс)" }
+        Write-Host "Прокси сейчас: $($chain -join ' → ')$delay"
+    }
 
     if ($All) {
-        Write-Host ""
-        Write-Host "Проверяю серверы группы $Group..."
         $url = [Uri]::EscapeDataString('https://www.gstatic.com/generate_204')
-        $d = Get-Api "/group/$Group/delay?url=$url&timeout=5000"
-        $alive = @{}
-        foreach ($prop in $d.PSObject.Properties) { $alive[$prop.Name] = [int]$prop.Value }
-        foreach ($name in $g.all) {
-            $mark = if ($name -eq $g.now) { '*' } else { ' ' }
-            $ms = if ($alive.ContainsKey($name) -and $alive[$name] -gt 0) { "$($alive[$name]) мс" } else { 'не отвечает' }
-            Write-Host ("  {0} {1,-40} {2}" -f $mark, $name, $ms)
+        # Группы приоритета по порядку, а если режим состоит из серверов, то он сам
+        $members = @($px.$modeGroup.all)
+        $tiers = if ($members -and @($members | Where-Object { Test-IsGroup $_ }).Count -eq $members.Count) { $members } else { @($modeGroup) }
+        Write-Host ""
+        Write-Host "Проверяю серверы..."
+        $n = 0
+        foreach ($tier in $tiers) {
+            $n++
+            $g = $px.$tier
+            if ($tiers.Count -gt 1) {
+                $mark = if ($tier -eq $px.$modeGroup.now) { '  ← используется' } else { '' }
+                Write-Host ""
+                Write-Host "$n. $tier$mark"
+            }
+            if (-not @($g.all)) { Write-Host "    серверов нет"; continue }
+            $alive = @{}
+            try {
+                $d = Get-Api "/group/$([Uri]::EscapeDataString($tier))/delay?url=$url&timeout=5000"
+                foreach ($prop in $d.PSObject.Properties) { $alive[$prop.Name] = [int]$prop.Value }
+            } catch {}  # mihomo отвечает ошибкой, если в группе не ответил ни один сервер
+            foreach ($s in $g.all) {
+                $mark = if ($s -eq $g.now) { '*' } else { ' ' }
+                $ms = if ($alive.ContainsKey($s) -and $alive[$s] -gt 0) { "$($alive[$s]) мс" } else { 'не отвечает' }
+                Write-Host ("  {0} {1,-40} {2}" -f $mark, $s, $ms)
+            }
         }
-        Write-Host "  * — выбран сейчас"
+        Write-Host ""
+        Write-Host "  * — выбран в своей группе"
     }
 } catch {
     Write-Host "API ($Api) не отвечает: $($_.Exception.Message)"

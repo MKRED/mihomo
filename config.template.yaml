@@ -23,8 +23,10 @@ external-ui: ui
 external-ui-url: https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz
 secret: ""
 
+# store-selected: выбранный режим группы proxy (см. proxy-groups) сохраняется в cache.db
+# и переживает перезапуск службы и перечитывание конфига
 profile:
-  store-selected: false
+  store-selected: true
   store-fake-ip: false
 
 # Виртуальный адаптер: через него проходит весь трафик машины, но наружу через прокси
@@ -91,15 +93,61 @@ proxy-providers:
       timeout: 5000
       lazy: true
 
-# Группа proxy сама выбирает самый быстрый сервер из подписки
+# Группа proxy (на неё ссылаются правила и DNS) — переключатель режима. Первый в списке включён по умолчанию,
+# дальше выбор сохраняется (profile.store-selected). Переключение: service.bat, пункт 11, или веб-панель.
+#   Все серверы — самый быстрый из всех серверов всех подписок;
+#   Приоритет   — первая по порядку группа, в которой есть живой сервер (res ip, затем США, затем остальные).
+#                 Когда более приоритетная группа оживает, режим возвращается к ней.
+# Внутри групп берётся самый быстрый сервер. filter/exclude-filter — регулярные выражения по имени
+# сервера; при нескольких подписках имя начинается с [N], поэтому без ^ в начале.
+# lazy: false, чтобы группы проверялись и тогда, когда трафик через них не идёт: при переключении режима
+# или на запасную группу задержки уже известны. Падение сервера замечается в пределах interval секунд
 proxy-groups:
   - name: proxy
+    type: select
+    proxies: [Все серверы, Приоритет]
+
+  - name: Все серверы
     type: url-test
     use: [sub]
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 100
-    lazy: true
+    lazy: false
+
+  - name: Приоритет
+    type: fallback
+    proxies: [res ip, США, Остальные]
+    url: https://www.gstatic.com/generate_204
+    interval: 60
+    lazy: false
+
+  - name: res ip
+    type: url-test
+    use: [sub]
+    filter: "(?i)res ip"
+    url: https://www.gstatic.com/generate_204
+    interval: 60
+    tolerance: 100
+    lazy: false
+
+  - name: США
+    type: url-test
+    use: [sub]
+    filter: "США|(?i)\\b(usa|us|united states)\\b|🇺🇸"
+    url: https://www.gstatic.com/generate_204
+    interval: 60
+    tolerance: 100
+    lazy: false
+
+  - name: Остальные
+    type: url-test
+    use: [sub]
+    exclude-filter: "(?i)res ip|США|(?i)\\b(usa|us|united states)\\b|🇺🇸"
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 100
+    lazy: false
 
 # Российские домены и IP из https://github.com/MetaCubeX/meta-rules-dat: mihomo сам скачивает
 # списки и обновляет их раз в сутки. ru-domains: зоны .ru, .su, .рф и российские сервисы

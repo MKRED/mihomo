@@ -6,6 +6,11 @@
   Config       - перечитать core\config.yaml (после правки config.template.yaml и сборки build-config.ps1).
                  TUN-адаптер пересоздаётся только если изменился раздел tun.
   Subscription - скачать подписки заново (все, если их несколько) и подменить серверы.
+  Mode         - переключить режим (группа proxy): на -Mode, а без него на следующий по списку.
+                 Выбор сохраняется в cache.db и переживает перезапуск службы.
+
+.PARAMETER Mode
+  Для -Action Mode: имя режима, например "Приоритет" или "Все серверы".
 
 .PARAMETER Api
   Адрес API mihomo. По умолчанию берётся из config.template.yaml (external-controller).
@@ -13,8 +18,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Config', 'Subscription')]
+    [ValidateSet('Config', 'Subscription', 'Mode')]
     [string]$Action,
+    [string]$Mode,
     [string]$Api
 )
 
@@ -22,6 +28,7 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 $Bin  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $Bin
+$Group = 'proxy'   # группа-переключатель режимов в config.template.yaml
 
 if (-not $Api) {
     $Api = '127.0.0.1:9090'
@@ -57,6 +64,21 @@ try {
                 $label = if ($subs.Count -gt 1) { "Подписка $name обновлена" } else { 'Подписка обновлена' }
                 Write-Host "${label}, серверов: $(@($pr.proxies).Count)"
             }
+        }
+        'Mode' {
+            # Читаем все группы одним запросом: имена не латиницей в адресе /proxies/<имя> лучше не передавать
+            $g = (Get-Api '/proxies').proxies.$Group
+            if (-not $g -or $g.type -ne 'Selector') { throw "группа $Group в работающем конфиге не переключатель режимов (type: select)" }
+            $modes = @($g.all)
+            if ($Mode) {
+                if ($modes -notcontains $Mode) { throw "нет режима ""$Mode"", есть: $($modes -join ', ')" }
+                $target = $Mode
+            } else {
+                $i = [array]::IndexOf($modes, $g.now)
+                $target = $modes[($i + 1) % $modes.Count]
+            }
+            Put-Api "/proxies/$Group" (@{ name = $target } | ConvertTo-Json -Compress)
+            Write-Host "Режим: $target (было: $($g.now))"
         }
     }
     exit 0
